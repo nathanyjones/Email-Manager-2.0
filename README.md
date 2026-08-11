@@ -50,3 +50,7 @@ uv run email-manager learn-folders
 ## Future work
 
 Near-real-time Microsoft Graph notifications, a review dashboard, AI-generated detailed contact profiles, reviewed folder moves, and sender/topic-triggered business automations are intentionally deferred until the pilot is approved and measured.
+
+
+Codex Chat
+019fedbd-38a0-76d1-b276-e2c60a43be75
