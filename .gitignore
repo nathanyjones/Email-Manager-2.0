@@ -12,3 +12,4 @@ wheels/
 token_cache.bin
 
 .env
+email-manager.db
