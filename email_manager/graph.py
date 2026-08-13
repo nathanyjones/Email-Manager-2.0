@@ -63,11 +63,14 @@ class GraphClient:
     @staticmethod
     def _email(item: dict[str, Any]) -> Email:
         address = item.get("from", {}).get("emailAddress", {})
-        recipients = tuple(
-            recipient.get("emailAddress", {}).get("address", "").lower()
-            for recipient in item.get("toRecipients", [])
-            if recipient.get("emailAddress", {}).get("address")
-        )
+        def recipient_addresses(field: str) -> tuple[str, ...]:
+            return tuple(
+                recipient.get("emailAddress", {}).get("address", "").lower()
+                for recipient in item.get(field, [])
+                if recipient.get("emailAddress", {}).get("address")
+            )
+
+        recipients = recipient_addresses("toRecipients")
         body = item.get("body", {})
         content = body.get("content", "")
         if body.get("contentType") == "HTML":
@@ -76,14 +79,15 @@ class GraphClient:
             id=item["id"], subject=item.get("subject") or "(no subject)",
             sender_name=address.get("name", "Unknown"), sender_email=address.get("address", "").lower(),
             received_at=item.get("receivedDateTime", ""), body_preview=item.get("bodyPreview", ""),
-            body=content, to_recipients=recipients, categories=tuple(item.get("categories", [])),
+            body=content, to_recipients=recipients, cc_recipients=recipient_addresses("ccRecipients"),
+            categories=tuple(item.get("categories", [])),
             web_link=item.get("webLink", ""),
         )
 
     def _list_messages(self, folder: str, since: datetime) -> list[Email]:
         since_utc = since.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         params: dict[str, Any] = {
-            "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,categories,webLink",
+            "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,categories,webLink",
             "$filter": f"receivedDateTime ge {since_utc}",
             "$orderby": "receivedDateTime desc",
             "$top": "50",
@@ -126,7 +130,7 @@ class GraphClient:
     def list_folder_messages(self, folder_id: str, limit: int) -> list[Email]:
         path = f"/me/mailFolders/{quote(folder_id, safe='')}/messages"
         response = self._request("GET", path, params={
-            "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,categories,webLink",
+            "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,categories,webLink",
             "$orderby": "receivedDateTime desc", "$top": str(limit),
         })
         return [self._email(item) for item in response.json().get("value", [])]

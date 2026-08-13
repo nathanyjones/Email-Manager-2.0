@@ -42,6 +42,9 @@ class Settings:
     folder_history_per_folder: int
     folder_min_examples: int
     folder_min_confidence: float
+    folder_semantic_suggestions_enabled: bool
+    folder_profile_samples: int
+    folder_semantic_min_confidence: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -85,4 +88,7 @@ class Settings:
             folder_history_per_folder=int(os.getenv("FOLDER_HISTORY_PER_FOLDER", "50")),
             folder_min_examples=int(os.getenv("FOLDER_MIN_EXAMPLES", "2")),
             folder_min_confidence=float(os.getenv("FOLDER_MIN_CONFIDENCE", "0.80")),
+            folder_semantic_suggestions_enabled=os.getenv("FOLDER_SEMANTIC_SUGGESTIONS_ENABLED", "false").lower() in {"1", "true", "yes"},
+            folder_profile_samples=int(os.getenv("FOLDER_PROFILE_SAMPLES", "10")),
+            folder_semantic_min_confidence=float(os.getenv("FOLDER_SEMANTIC_MIN_CONFIDENCE", "0.75")),
         )

@@ -87,6 +87,10 @@ class EmailManager:
     def _suggest_folder(self, email: Email) -> FolderSuggestion | None:
         if not self.settings.folder_suggestions_enabled:
             return None
+        if self.settings.folder_semantic_suggestions_enabled:
+            semantic = self.assistant.suggest_semantic_folder(email, self.store.get_folder_profiles())
+            if semantic and semantic.confidence >= self.settings.folder_semantic_min_confidence:
+                return semantic
         return self.store.suggest_folder(
             email.sender_email, self.settings.folder_min_examples, self.settings.folder_min_confidence
         )
@@ -163,3 +167,19 @@ class EmailManager:
                 scanned_messages += 1
         self.store.replace_folder_observations(observations)
         return len(folders), scanned_messages
+
+    def learn_folder_profiles(self) -> tuple[int, int]:
+        """Build semantic folder profiles from bounded samples; never changes mailbox messages."""
+        profiles = []
+        scanned_messages = 0
+        excluded = {name.lower() for name in self.settings.excluded_folders}
+        for folder in self.graph.list_user_folders():
+            if folder.display_name.lower() in SPECIAL_FOLDERS or folder.display_name.lower() in excluded:
+                continue
+            emails = self.graph.list_folder_messages(folder.id, self.settings.folder_profile_samples)
+            if not emails:
+                continue
+            profiles.append(self.assistant.build_folder_profile(folder.display_name, folder.id, emails))
+            scanned_messages += len(emails)
+        self.store.replace_folder_profiles(profiles)
+        return len(profiles), scanned_messages

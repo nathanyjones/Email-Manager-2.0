@@ -37,6 +37,7 @@ Get written approval from the company’s Microsoft 365/IT and security owners f
 - If action items exist, a digest is created as an Outlook draft rather than sent.
 - `bootstrap-profiles --days 30` creates a small, bounded recipient profile from recent Sent-message metadata. It does not index full mailbox history or automatically move old email.
 - `learn-folders` scans visible non-system folders and learns high-confidence sender-to-folder tendencies. Future messages from those senders receive an `AI: Suggested — <folder>` category; they are never moved.
+- `learn-folder-profiles` sends a bounded sample from each non-system folder to the configured LLM and stores a compact local profile of its purpose, topics, and participant signals. With `FOLDER_SEMANTIC_SUGGESTIONS_ENABLED=true`, new messages are matched to these profiles using content, sender, To, and CC signals; only suggestions meeting the confidence threshold become categories.
 
 ## Commands
 
@@ -45,6 +46,13 @@ uv run email-manager run
 uv run email-manager serve
 uv run email-manager bootstrap-profiles --days 30
 uv run email-manager learn-folders
+uv run email-manager learn-folder-profiles
+```
+
+After profiling, inspect the compact local profiles before enabling semantic suggestions:
+
+```bash
+sqlite3 email-manager.db "SELECT folder_name, purpose, topics, participant_signals, examples_seen FROM folder_profiles ORDER BY folder_name;"
 ```
 
 ## Future work

@@ -50,6 +50,7 @@ def main() -> None:
     bootstrap = commands.add_parser("bootstrap-profiles", help="Build bounded recipient profiles from sent mail")
     bootstrap.add_argument("--days", type=int, default=30)
     commands.add_parser("learn-folders", help="Learn existing sender-to-folder patterns without moving mail")
+    commands.add_parser("learn-folder-profiles", help="Build AI folder-purpose profiles from bounded samples; never moves mail")
     args = parser.parse_args()
     if args.command == "run":
         _run_once()
@@ -61,11 +62,18 @@ def main() -> None:
             print(f"Reviewed {manager.bootstrap_profiles(args.days)} sent messages for contact profiles.")
         finally:
             store.close()
-    else:
+    elif args.command == "learn-folders":
         manager, store = _manager()
         try:
             folders, messages = manager.learn_folders()
             print(f"Scanned {messages} messages across {folders} folders; no messages were moved.")
+        finally:
+            store.close()
+    else:
+        manager, store = _manager()
+        try:
+            profiles, messages = manager.learn_folder_profiles()
+            print(f"Built {profiles} semantic folder profile(s) from {messages} message samples; no messages were moved.")
         finally:
             store.close()
 

@@ -15,6 +15,7 @@ class Email:
     body_preview: str
     body: str
     to_recipients: tuple[str, ...] = ()
+    cc_recipients: tuple[str, ...] = ()
     categories: tuple[str, ...] = ()
     web_link: str = ""
 
@@ -56,6 +57,17 @@ class FolderSuggestion:
     folder_name: str
     examples: int
     confidence: float
+    source: str = "sender-history"
+
+
+@dataclass(frozen=True)
+class FolderProfile:
+    folder_id: str
+    folder_name: str
+    purpose: str
+    topics: tuple[str, ...]
+    participant_signals: tuple[str, ...]
+    examples_seen: int
 
 
 @dataclass

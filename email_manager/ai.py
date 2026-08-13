@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from openai import OpenAI
 
-from .models import Assessment, ContactProfile, Email
+from .models import Assessment, ContactProfile, Email, FolderProfile, FolderSuggestion
 
 
 SYSTEM_PROMPT = """You are a careful executive email assistant. Return only a JSON object.
@@ -58,3 +58,61 @@ class EmailAssistant:
             suggested_followup_time=data.get("suggested_followup_time") if data.get("suggested_followup_time") in {"today", "this_week", "later", "none"} else "none",
             confidence=max(0.0, min(1.0, float(data.get("confidence", 0.0)))), rationale=str(data.get("rationale", ""))[:1000],
         )
+
+    def build_folder_profile(self, folder_name: str, folder_id: str, emails: list[Email]) -> FolderProfile:
+        """Summarize a bounded set of filed messages into a compact local folder profile."""
+        samples = "\n\n".join(
+            f"From: {email.sender_email}\nTo: {', '.join(email.to_recipients)}\nCC: {', '.join(email.cc_recipients)}\n"
+            f"Subject: {email.subject}\nPreview: {email.body_preview[:800]}"
+            for email in emails
+        )
+        prompt = """You describe the practical purpose of an email folder from its sample messages. Return only JSON.
+Never include sensitive details, names, addresses, or verbatim email text in the result. Generalize participants by role,
+organization type, or domain pattern where possible.
+Schema: {"purpose":"one concise sentence","topics":["short topic"],"participant_signals":["general signal"]}"""
+        response = self.client.chat.completions.create(
+            model=self.model, temperature=0, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": f"Folder: {folder_name}\nSamples:\n{samples}"}],
+        )
+        try:
+            data = json.loads(response.choices[0].message.content or "{}")
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Model returned invalid folder profile for {folder_name}") from error
+        return FolderProfile(
+            folder_id=folder_id, folder_name=folder_name, purpose=str(data.get("purpose", "General correspondence."))[:500],
+            topics=tuple(str(item)[:120] for item in data.get("topics", [])[:8]),
+            participant_signals=tuple(str(item)[:160] for item in data.get("participant_signals", [])[:8]),
+            examples_seen=len(emails),
+        )
+
+    def suggest_semantic_folder(self, email: Email, folder_profiles: list[FolderProfile]) -> FolderSuggestion | None:
+        if not folder_profiles:
+            return None
+        profiles = "\n".join(
+            f"ID: {profile.folder_id}\nName: {profile.folder_name}\nPurpose: {profile.purpose}\n"
+            f"Topics: {', '.join(profile.topics)}\nParticipant signals: {', '.join(profile.participant_signals)}\n"
+            for profile in folder_profiles
+        )
+        prompt = """Choose the best existing folder for a message. Use the message subject/body as the primary signal;
+sender, To, and CC are secondary signals. Return only JSON. If no folder clearly fits, use null.
+Schema: {"folder_id":"an offered ID or null","confidence":0.0,"rationale":"brief reason"}"""
+        message = (
+            f"Folders:\n{profiles}\nMessage:\nFrom: {email.sender_email}\nTo: {', '.join(email.to_recipients)}\n"
+            f"CC: {', '.join(email.cc_recipients)}\nSubject: {email.subject}\nBody: {email.body[:5000]}"
+        )
+        response = self.client.chat.completions.create(
+            model=self.model, temperature=0, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": message}],
+        )
+        try:
+            data = json.loads(response.choices[0].message.content or "{}")
+        except json.JSONDecodeError as error:
+            raise ValueError("Model returned invalid semantic folder suggestion") from error
+        profile = {profile.folder_id: profile for profile in folder_profiles}.get(data.get("folder_id"))
+        if not profile:
+            return None
+        try:
+            confidence = max(0.0, min(1.0, float(data.get("confidence", 0))))
+        except (TypeError, ValueError):
+            return None
+        return FolderSuggestion(profile.folder_id, profile.folder_name, profile.examples_seen, confidence, "semantic")

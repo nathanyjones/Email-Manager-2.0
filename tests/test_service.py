@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from email_manager.models import Assessment, Email, MailFolder
+from email_manager.models import Assessment, Email, FolderProfile, FolderSuggestion, MailFolder
 from email_manager.service import EmailManager
 from email_manager.store import Store
 
@@ -63,6 +63,12 @@ class FakeAssistant:
     def assess(self, email, profile, draft_tone):
         return self.assessment
 
+    def build_folder_profile(self, folder_name, folder_id, emails):
+        return FolderProfile(folder_id, folder_name, f"{folder_name} correspondence", (folder_name,), (), len(emails))
+
+    def suggest_semantic_folder(self, email, folder_profiles):
+        return None
+
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):
@@ -75,6 +81,8 @@ class ServiceTests(unittest.TestCase):
             draft_signature="Owner", no_reply_senders=(), no_reply_domains=(),
             folder_suggestions_enabled=True, folder_history_per_folder=50,
             folder_min_examples=2, folder_min_confidence=0.8, excluded_folders=(),
+            folder_semantic_suggestions_enabled=False, folder_profile_samples=10,
+            folder_semantic_min_confidence=0.75,
         )
 
     def tearDown(self):
@@ -139,6 +147,35 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result.processed, 1)
         self.assertIn((EMAIL.id, "AI: Suggested — Projects", True), graph.categories)
         self.assertEqual(len(graph.drafts), 1)
+
+    def test_semantic_profile_can_suggest_folder_for_a_mixed_sender(self):
+        stored_messages = [
+            Email(id="project-1", subject="Proposal for new site", sender_name="Client", sender_email="client@example.com",
+                  received_at="2026-08-01T12:00:00Z", body_preview="New project proposal scope", body="New project proposal scope")
+        ]
+        graph = FakeGraph([], folders=(MailFolder("projects", "Projects"),), folder_messages={"projects": stored_messages})
+
+        class SemanticAssistant(FakeAssistant):
+            def suggest_semantic_folder(self, email, folder_profiles):
+                return FolderSuggestion("projects", "Projects", 1, 0.92, "semantic")
+
+        manager = EmailManager(self.settings, graph, SemanticAssistant(), self.store)
+        self.assertEqual(manager.learn_folder_profiles(), (1, 1))
+        self.settings.folder_semantic_suggestions_enabled = True
+        graph.emails = [EMAIL]
+        manager.run()
+        self.assertIn((EMAIL.id, "AI: Suggested — Projects", True), graph.categories)
+
+    def test_low_confidence_semantic_suggestion_does_not_override_sender_history(self):
+        self.store.replace_folder_profiles([FolderProfile("projects", "Projects", "Project work", (), (), 2)])
+
+        class LowConfidenceAssistant(FakeAssistant):
+            def suggest_semantic_folder(self, email, folder_profiles):
+                return FolderSuggestion("projects", "Projects", 2, 0.40, "semantic")
+
+        self.settings.folder_semantic_suggestions_enabled = True
+        result = EmailManager(self.settings, FakeGraph([EMAIL]), LowConfidenceAssistant(), self.store).run()
+        self.assertEqual(result.processed, 1)
 
 
 if __name__ == "__main__":

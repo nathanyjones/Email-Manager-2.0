@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from .models import Assessment, ContactProfile, FolderSuggestion
+from .models import Assessment, ContactProfile, FolderProfile, FolderSuggestion
 
 
 class Store:
@@ -34,6 +34,15 @@ class Store:
                 message_count INTEGER NOT NULL,
                 PRIMARY KEY (sender_email, folder_id)
             );
+            CREATE TABLE IF NOT EXISTS folder_profiles (
+                folder_id TEXT PRIMARY KEY,
+                folder_name TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                topics TEXT NOT NULL,
+                participant_signals TEXT NOT NULL,
+                examples_seen INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS contact_profiles (
                 email TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL DEFAULT '',
@@ -49,6 +58,26 @@ class Store:
         if "suggested_folder" not in columns:
             self.connection.execute("ALTER TABLE processed_messages ADD COLUMN suggested_folder TEXT")
         self.connection.commit()
+
+    def replace_folder_profiles(self, profiles: list[FolderProfile]) -> None:
+        self.connection.execute("DELETE FROM folder_profiles")
+        self.connection.executemany(
+            """INSERT INTO folder_profiles
+            (folder_id, folder_name, purpose, topics, participant_signals, examples_seen, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [(profile.folder_id, profile.folder_name, profile.purpose, json.dumps(profile.topics),
+              json.dumps(profile.participant_signals), profile.examples_seen, datetime.now(timezone.utc).isoformat())
+             for profile in profiles],
+        )
+        self.connection.commit()
+
+    def get_folder_profiles(self) -> list[FolderProfile]:
+        rows = self.connection.execute("SELECT * FROM folder_profiles ORDER BY folder_name").fetchall()
+        return [FolderProfile(
+            folder_id=row["folder_id"], folder_name=row["folder_name"], purpose=row["purpose"],
+            topics=tuple(json.loads(row["topics"])), participant_signals=tuple(json.loads(row["participant_signals"])),
+            examples_seen=row["examples_seen"],
+        ) for row in rows]
 
     def was_processed(self, message_id: str) -> bool:
         return self.connection.execute(
