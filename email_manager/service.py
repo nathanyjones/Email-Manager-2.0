@@ -37,7 +37,17 @@ class EmailManager:
                 result.skipped += 1
                 continue
             try:
-                profile = self.store.get_profile(email.sender_email)
+                stored_profile = self.store.get_profile(email.sender_email)
+                profile = stored_profile
+                feedback_context = self.store.feedback_summary(email.sender_email)
+                if feedback_context:
+                    profile = ContactProfile(
+                        email=profile.email, display_name=profile.display_name,
+                        relationship_notes=profile.relationship_notes, style_notes=profile.style_notes,
+                        recurring_topics=profile.recurring_topics,
+                        response_preferences="\n".join(filter(None, (profile.response_preferences, feedback_context))),
+                        examples_seen=profile.examples_seen,
+                    )
                 assessment = self.assistant.assess(email, profile, self.settings.draft_tone)
                 label = CATEGORY_LABELS[assessment.category]
                 self.graph.categorize(email, label, flagged=assessment.needs_action)
@@ -49,8 +59,8 @@ class EmailManager:
                 if assessment.needs_response and assessment.draft_reply and self._draft_allowed(email, assessment):
                     draft_id = self.graph.create_reply_draft(email.id, self._format_draft(email, assessment.draft_reply))
                     result.drafts_created += 1
-                self.store.record_processed(email.id, assessment, draft_id, suggestion.folder_name if suggestion else None)
-                self._learn_from_assessment(email, assessment, profile)
+                self.store.record_processed(email, assessment, draft_id, suggestion.folder_name if suggestion else None)
+                self._learn_from_assessment(email, assessment, stored_profile)
                 if assessment.needs_action:
                     result.action_items.append((email, assessment, suggestion))
                 result.processed += 1
@@ -70,7 +80,9 @@ class EmailManager:
         if sender in self.settings.no_reply_senders:
             return False
         local_part, _, domain = sender.partition("@")
-        return domain not in self.settings.no_reply_domains and not any(marker in local_part for marker in AUTOMATED_LOCAL_PART_MARKERS)
+        if domain in self.settings.no_reply_domains or any(marker in local_part for marker in AUTOMATED_LOCAL_PART_MARKERS):
+            return False
+        return not self.store.reply_preference(sender, assessment.category).suppress_drafts
 
     def _format_draft(self, email: Email, draft_body: str) -> str:
         lines: list[str] = []

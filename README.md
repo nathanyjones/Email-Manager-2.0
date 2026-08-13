@@ -47,6 +47,9 @@ uv run email-manager serve
 uv run email-manager bootstrap-profiles --days 30
 uv run email-manager learn-folders
 uv run email-manager learn-folder-profiles
+uv run email-manager feedback <source-message-id> draft_sent
+uv run email-manager feedback-list
+uv run email-manager feedback-summary
 ```
 
 After profiling, inspect the compact local profiles before enabling semantic suggestions:
@@ -54,6 +57,23 @@ After profiling, inspect the compact local profiles before enabling semantic sug
 ```bash
 sqlite3 email-manager.db "SELECT folder_name, purpose, topics, participant_signals, examples_seen FROM folder_profiles ORDER BY folder_name;"
 ```
+
+## Reply feedback
+
+Record reply decisions manually after reviewing a draft in Outlook. The feedback stays in the local SQLite database; the app does not monitor, send, or inspect Outlook activity automatically.
+
+```bash
+uv run email-manager feedback <source-message-id> draft_sent
+uv run email-manager feedback <source-message-id> draft_edited --note "Needed a shorter opening"
+uv run email-manager feedback <source-message-id> draft_deleted
+uv run email-manager feedback <source-message-id> manual_draft_requested
+uv run email-manager feedback <source-message-id> never_draft_like_this --note "Receipt only"
+uv run email-manager feedback-list
+uv run email-manager feedback-summary
+uv run email-manager feedback-remove <source-message-id>
+```
+
+The source message ID must already be present in local processing history. Feedback is one editable current decision per source message. The assessor receives an aggregate sender-level count as context, while automatic draft suppression is stricter: it applies only to the same sender and AI category after at least two negative points (one explicit `never_draft_like_this` counts as two) and at least 75% negative feedback. Hard no-reply rules always take precedence.
 
 ## Future work
 

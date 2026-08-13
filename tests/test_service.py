@@ -177,6 +177,48 @@ class ServiceTests(unittest.TestCase):
         result = EmailManager(self.settings, FakeGraph([EMAIL]), LowConfidenceAssistant(), self.store).run()
         self.assertEqual(result.processed, 1)
 
+    def test_explicit_never_draft_feedback_suppresses_same_sender_and_category(self):
+        first_graph = FakeGraph([EMAIL])
+        EmailManager(self.settings, first_graph, FakeAssistant(), self.store).run()
+        self.store.record_feedback(EMAIL.id, "never_draft_like_this", "Receipts do not need replies")
+
+        similar = Email(
+            id="message-2", subject="Another proposal", sender_name="Client", sender_email="client@example.com",
+            received_at="2026-08-11T12:00:00Z", body_preview="Please review.", body="Please review.",
+        )
+        second_graph = FakeGraph([similar])
+        result = EmailManager(self.settings, second_graph, FakeAssistant(), self.store).run()
+
+        preference = self.store.reply_preference("client@example.com", "action")
+        self.assertTrue(preference.suppress_drafts)
+        self.assertEqual(self.store.list_reply_preferences(), [preference])
+        self.assertEqual((result.processed, result.drafts_created), (1, 0))
+        self.assertEqual(second_graph.drafts, [])
+
+    def test_feedback_is_editable_and_is_passed_to_the_assessor(self):
+        EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(), self.store).run()
+        self.store.record_feedback(EMAIL.id, "draft_deleted", "Too eager")
+        self.store.record_feedback(EMAIL.id, "draft_edited", "Actually useful after editing")
+        records = self.store.list_feedback()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].feedback_type, "draft_edited")
+
+        captured_profiles = []
+
+        class CapturingAssistant(FakeAssistant):
+            def assess(self, email, profile, draft_tone):
+                captured_profiles.append(profile)
+                return self.assessment
+
+        new_email = Email(
+            id="message-3", subject="Follow-up", sender_name="Client", sender_email="client@example.com",
+            received_at="2026-08-11T12:00:00Z", body_preview="Please reply.", body="Please reply.",
+        )
+        EmailManager(self.settings, FakeGraph([new_email]), CapturingAssistant(), self.store).run()
+        self.assertIn("Explicit local feedback", captured_profiles[0].response_preferences)
+        self.assertTrue(self.store.remove_feedback(EMAIL.id))
+        self.assertEqual(self.store.list_feedback(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

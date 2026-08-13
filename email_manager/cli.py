@@ -42,6 +42,56 @@ def _serve() -> None:
         time.sleep(20)
 
 
+def _record_feedback(message_id: str, feedback_type: str, note: str) -> None:
+    settings = Settings.from_env()
+    store = Store(settings.database_path)
+    try:
+        feedback = store.record_feedback(message_id, feedback_type, note)
+        print(f"Saved {feedback.feedback_type} feedback for {feedback.message_id} ({feedback.sender_email}, {feedback.category}).")
+    finally:
+        store.close()
+
+
+def _list_feedback(sender: str | None, limit: int) -> None:
+    settings = Settings.from_env()
+    store = Store(settings.database_path)
+    try:
+        records = store.list_feedback(sender, limit)
+        if not records:
+            print("No local feedback records.")
+            return
+        for record in records:
+            note = f" — {record.note}" if record.note else ""
+            print(f"{record.recorded_at}\t{record.message_id}\t{record.feedback_type}\t{record.sender_email}\t{record.category}{note}")
+    finally:
+        store.close()
+
+
+def _remove_feedback(message_id: str) -> None:
+    settings = Settings.from_env()
+    store = Store(settings.database_path)
+    try:
+        print("Removed feedback." if store.remove_feedback(message_id) else "No feedback record found.")
+    finally:
+        store.close()
+
+
+def _show_feedback_summary() -> None:
+    settings = Settings.from_env()
+    store = Store(settings.database_path)
+    try:
+        preferences = store.list_reply_preferences()
+        if not preferences:
+            print("No local reply preferences.")
+            return
+        for preference in preferences:
+            decision = "suppress drafts" if preference.suppress_drafts else "no suppression"
+            print(f"{preference.sender_email}\t{preference.category}\tpositive={preference.positive_examples}\t"
+                  f"negative_weight={preference.negative_weight}\tnegative_share={preference.confidence:.0%}\t{decision}")
+    finally:
+        store.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Safe Outlook email triage and drafting pilot")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -51,6 +101,16 @@ def main() -> None:
     bootstrap.add_argument("--days", type=int, default=30)
     commands.add_parser("learn-folders", help="Learn existing sender-to-folder patterns without moving mail")
     commands.add_parser("learn-folder-profiles", help="Build AI folder-purpose profiles from bounded samples; never moves mail")
+    feedback = commands.add_parser("feedback", help="Record an explicit local reply-feedback decision")
+    feedback.add_argument("message_id", help="Source message ID from local processing history")
+    feedback.add_argument("feedback_type", choices=("draft_sent", "draft_edited", "draft_deleted", "manual_draft_requested", "never_draft_like_this"))
+    feedback.add_argument("--note", default="", help="Optional local note (up to 1,000 characters)")
+    feedback_list = commands.add_parser("feedback-list", help="Inspect locally recorded reply feedback")
+    feedback_list.add_argument("--sender", help="Only show feedback for this sender")
+    feedback_list.add_argument("--limit", type=int, default=100)
+    feedback_remove = commands.add_parser("feedback-remove", help="Remove feedback for a source message")
+    feedback_remove.add_argument("message_id")
+    commands.add_parser("feedback-summary", help="Inspect the transparent aggregate reply-preference rules")
     args = parser.parse_args()
     if args.command == "run":
         _run_once()
@@ -69,6 +129,14 @@ def main() -> None:
             print(f"Scanned {messages} messages across {folders} folders; no messages were moved.")
         finally:
             store.close()
+    elif args.command == "feedback":
+        _record_feedback(args.message_id, args.feedback_type, args.note)
+    elif args.command == "feedback-list":
+        _list_feedback(args.sender, args.limit)
+    elif args.command == "feedback-remove":
+        _remove_feedback(args.message_id)
+    elif args.command == "feedback-summary":
+        _show_feedback_summary()
     else:
         manager, store = _manager()
         try:

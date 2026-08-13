@@ -70,6 +70,31 @@ class FolderProfile:
     examples_seen: int
 
 
+@dataclass(frozen=True)
+class FeedbackRecord:
+    """An explicit, locally recorded user decision about one source message."""
+
+    message_id: str
+    feedback_type: str
+    sender_email: str
+    category: str
+    had_draft: bool
+    note: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class ReplyPreference:
+    """Inspectable aggregate of feedback for a sender and message category."""
+
+    sender_email: str
+    category: str
+    positive_examples: int
+    negative_weight: int
+    confidence: float
+    suppress_drafts: bool
+
+
 @dataclass
 class RunResult:
     processed: int = 0
