@@ -58,3 +58,7 @@ sqlite3 email-manager.db "SELECT folder_name, purpose, topics, participant_signa
 ## Future work
 
 Near-real-time Microsoft Graph notifications, a review dashboard, AI-generated detailed contact profiles, reviewed folder moves, and sender/topic-triggered business automations are intentionally deferred until the pilot is approved and measured.
+
+
+Codex Chat
+019fedbd-38a0-76d1-b276-e2c60a43be75
