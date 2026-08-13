@@ -50,6 +50,7 @@ uv run email-manager learn-folder-profiles
 uv run email-manager feedback <source-message-id> draft_sent
 uv run email-manager feedback-list
 uv run email-manager feedback-summary
+uv run email-manager dashboard
 ```
 
 After profiling, inspect the compact local profiles before enabling semantic suggestions:
@@ -74,6 +75,10 @@ uv run email-manager feedback-remove <source-message-id>
 ```
 
 The source message ID must already be present in local processing history. Feedback is one editable current decision per source message. The assessor receives an aggregate sender-level count as context, while automatic draft suppression is stricter: it applies only to the same sender and AI category after at least two negative points (one explicit `never_draft_like_this` counts as two) and at least 75% negative feedback. Hard no-reply rules always take precedence.
+
+## Local review dashboard
+
+Start the dashboard with `uv run email-manager dashboard`, then open <http://127.0.0.1:8765>. It is deliberately bound to localhost only. The review queue shows recent AI decisions, feedback buttons, and the transparent aggregate preference rules. It makes no Graph or OpenAI request by itself and cannot send, move, or delete messages. Source-email links are saved for messages processed after this dashboard update; older local records will simply show no link.
 
 ## Future work
 

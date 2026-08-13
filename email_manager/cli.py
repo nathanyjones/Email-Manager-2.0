@@ -8,6 +8,7 @@ import time
 
 from .ai import EmailAssistant
 from .config import Settings
+from .dashboard import serve_dashboard
 from .graph import GraphClient
 from .service import EmailManager
 from .store import Store
@@ -111,6 +112,8 @@ def main() -> None:
     feedback_remove = commands.add_parser("feedback-remove", help="Remove feedback for a source message")
     feedback_remove.add_argument("message_id")
     commands.add_parser("feedback-summary", help="Inspect the transparent aggregate reply-preference rules")
+    dashboard = commands.add_parser("dashboard", help="Start the local-only review dashboard")
+    dashboard.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     if args.command == "run":
         _run_once()
@@ -137,6 +140,10 @@ def main() -> None:
         _remove_feedback(args.message_id)
     elif args.command == "feedback-summary":
         _show_feedback_summary()
+    elif args.command == "dashboard":
+        if not 1024 <= args.port <= 65535:
+            parser.error("dashboard --port must be between 1024 and 65535")
+        serve_dashboard(Settings.from_env(), args.port)
     else:
         manager, store = _manager()
         try:

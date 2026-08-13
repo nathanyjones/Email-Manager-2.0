@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from .models import Assessment, ContactProfile, Email, FeedbackRecord, FolderProfile, FolderSuggestion, ReplyPreference
+from .models import Assessment, ContactProfile, Email, FeedbackRecord, FolderProfile, FolderSuggestion, ProcessedMessage, ReplyPreference
 
 
 FEEDBACK_TYPES = {
@@ -75,6 +75,8 @@ class Store:
             self.connection.execute("ALTER TABLE processed_messages ADD COLUMN sender_email TEXT NOT NULL DEFAULT ''")
         if "subject" not in columns:
             self.connection.execute("ALTER TABLE processed_messages ADD COLUMN subject TEXT NOT NULL DEFAULT ''")
+        if "source_web_link" not in columns:
+            self.connection.execute("ALTER TABLE processed_messages ADD COLUMN source_web_link TEXT NOT NULL DEFAULT ''")
         self.connection.commit()
 
     def replace_folder_profiles(self, profiles: list[FolderProfile]) -> None:
@@ -105,13 +107,29 @@ class Store:
     def record_processed(self, email: Email, assessment: Assessment, draft_id: str | None, suggested_folder: str | None = None) -> None:
         self.connection.execute(
             """INSERT OR REPLACE INTO processed_messages
-               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, suggested_folder, sender_email, subject)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, suggested_folder, sender_email, subject, source_web_link)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (email.id, datetime.now(timezone.utc).isoformat(), assessment.category,
              assessment.needs_response, assessment.needs_action, draft_id, assessment.summary, suggested_folder,
-             email.sender_email.lower(), email.subject[:500]),
+             email.sender_email.lower(), email.subject[:500], email.web_link),
         )
         self.connection.commit()
+
+    def list_processed_messages(self, limit: int = 100) -> list[ProcessedMessage]:
+        """Return recent locally stored decisions for the local review dashboard."""
+        rows = self.connection.execute(
+            """SELECT processed_messages.*, feedback_records.feedback_type, feedback_records.note AS feedback_note
+               FROM processed_messages LEFT JOIN feedback_records
+               ON processed_messages.message_id = feedback_records.message_id
+               ORDER BY processed_at DESC LIMIT ?""", (max(1, min(limit, 500)),)
+        ).fetchall()
+        return [ProcessedMessage(
+            message_id=row["message_id"], processed_at=row["processed_at"], sender_email=row["sender_email"],
+            subject=row["subject"], category=row["category"], needs_response=bool(row["needs_response"]),
+            needs_action=bool(row["needs_action"]), has_draft=bool(row["draft_id"]), summary=row["summary"],
+            suggested_folder=row["suggested_folder"], source_web_link=row["source_web_link"],
+            feedback_type=row["feedback_type"], feedback_note=row["feedback_note"] or "",
+        ) for row in rows]
 
     def record_feedback(self, message_id: str, feedback_type: str, note: str = "") -> FeedbackRecord:
         """Save or replace the user's current explicit decision for a processed message."""

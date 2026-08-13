@@ -95,6 +95,25 @@ class ReplyPreference:
     suppress_drafts: bool
 
 
+@dataclass(frozen=True)
+class ProcessedMessage:
+    """A review-safe summary of a locally processed source message."""
+
+    message_id: str
+    processed_at: str
+    sender_email: str
+    subject: str
+    category: str
+    needs_response: bool
+    needs_action: bool
+    has_draft: bool
+    summary: str
+    suggested_folder: str | None
+    source_web_link: str
+    feedback_type: str | None = None
+    feedback_note: str = ""
+
+
 @dataclass
 class RunResult:
     processed: int = 0

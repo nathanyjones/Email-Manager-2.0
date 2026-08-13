@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 from email_manager.models import Assessment, Email, FolderProfile, FolderSuggestion, MailFolder
+from email_manager.dashboard import render_dashboard
 from email_manager.service import EmailManager
 from email_manager.store import Store
 
@@ -218,6 +219,19 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("Explicit local feedback", captured_profiles[0].response_preferences)
         self.assertTrue(self.store.remove_feedback(EMAIL.id))
         self.assertEqual(self.store.list_feedback(), [])
+
+    def test_review_queue_includes_saved_message_details_and_escapes_content(self):
+        unsafe = Email(
+            id="message-4", subject="<unsafe>", sender_name="Client", sender_email="client@example.com",
+            received_at="2026-08-11T12:00:00Z", body_preview="", body="", web_link="https://outlook.example/message-4",
+        )
+        EmailManager(self.settings, FakeGraph([unsafe]), FakeAssistant(), self.store).run()
+        messages = self.store.list_processed_messages()
+        self.assertEqual(messages[0].source_web_link, unsafe.web_link)
+        page = render_dashboard(messages, self.store.list_reply_preferences())
+        self.assertIn("Open source email", page)
+        self.assertIn("&lt;unsafe&gt;", page)
+        self.assertNotIn("<h2><unsafe>", page)
 
 
 if __name__ == "__main__":
