@@ -110,8 +110,19 @@ class ProcessedMessage:
     summary: str
     suggested_folder: str | None
     source_web_link: str
+    draft_web_link: str = ""
+    draft_reason: str = ""
     feedback_type: str | None = None
     feedback_note: str = ""
+
+
+@dataclass(frozen=True)
+class RunHistory:
+    run_at: str
+    processed: int
+    drafts_created: int
+    skipped: int
+    errors: int
 
 
 @dataclass

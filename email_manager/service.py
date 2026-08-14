@@ -56,10 +56,13 @@ class EmailManager:
                     self.graph.ensure_category(self._suggestion_category(suggestion), "preset6")
                     self.graph.categorize(email, self._suggestion_category(suggestion), flagged=assessment.needs_action)
                 draft_id = None
-                if assessment.needs_response and assessment.draft_reply and self._draft_allowed(email, assessment):
-                    draft_id = self.graph.create_reply_draft(email.id, self._format_draft(email, assessment.draft_reply))
+                draft_web_link = ""
+                draft_reason = self._draft_reason(email, assessment)
+                if draft_reason == "draft_created":
+                    draft_id, draft_web_link = self.graph.create_reply_draft(email.id, self._format_draft(email, assessment.draft_reply or ""))
                     result.drafts_created += 1
-                self.store.record_processed(email, assessment, draft_id, suggestion.folder_name if suggestion else None)
+                self.store.record_processed(email, assessment, draft_id, suggestion.folder_name if suggestion else None,
+                                            draft_web_link, draft_reason)
                 self._learn_from_assessment(email, assessment, stored_profile)
                 if assessment.needs_action:
                     result.action_items.append((email, assessment, suggestion))
@@ -68,21 +71,28 @@ class EmailManager:
                 result.errors += 1
                 print(f"Failed to process {email.id}: {error}")
         self._create_digest(result, now)
+        self.store.record_run(now.isoformat(), result.processed, result.drafts_created, result.skipped, result.errors)
         return result
 
     def _excluded(self, email: Email) -> bool:
         return email.sender_email.lower() in self.settings.excluded_senders
 
-    def _draft_allowed(self, email: Email, assessment: Assessment) -> bool:
+    def _draft_reason(self, email: Email, assessment: Assessment) -> str:
+        if not assessment.needs_response:
+            return "AI assessed that no personal reply is needed."
+        if not assessment.draft_reply:
+            return "AI did not have enough safe context to prepare a reply."
         if assessment.category in {"marketing", "spam"}:
-            return False
+            return "Replies are disabled for marketing and spam."
         sender = email.sender_email.lower()
         if sender in self.settings.no_reply_senders:
-            return False
+            return "Replies are blocked for this configured no-reply sender."
         local_part, _, domain = sender.partition("@")
         if domain in self.settings.no_reply_domains or any(marker in local_part for marker in AUTOMATED_LOCAL_PART_MARKERS):
-            return False
-        return not self.store.reply_preference(sender, assessment.category).suppress_drafts
+            return "Replies are blocked for automated or no-reply senders."
+        if self.store.reply_preference(sender, assessment.category).suppress_drafts:
+            return "Your explicit feedback suppresses drafts for this sender and category."
+        return "draft_created"
 
     def _format_draft(self, email: Email, draft_body: str) -> str:
         lines: list[str] = []
@@ -195,3 +205,20 @@ class EmailManager:
             scanned_messages += len(emails)
         self.store.replace_folder_profiles(profiles)
         return len(profiles), scanned_messages
+
+    def refresh_dashboard_metadata(self, limit: int = 500) -> tuple[int, int]:
+        """Backfill legacy dashboard fields from Graph without changing any messages."""
+        updated = 0
+        unavailable = 0
+        for message_id in self.store.dashboard_metadata_gaps(limit):
+            try:
+                email = self.graph.get_message(message_id)
+                if email is None:
+                    unavailable += 1
+                    continue
+                self.store.update_dashboard_metadata(email)
+                updated += 1
+            except Exception as error:
+                unavailable += 1
+                print(f"Could not refresh dashboard metadata for {message_id}: {error}")
+        return updated, unavailable

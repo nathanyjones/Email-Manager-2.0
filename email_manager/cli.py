@@ -112,6 +112,8 @@ def main() -> None:
     feedback_remove = commands.add_parser("feedback-remove", help="Remove feedback for a source message")
     feedback_remove.add_argument("message_id")
     commands.add_parser("feedback-summary", help="Inspect the transparent aggregate reply-preference rules")
+    refresh = commands.add_parser("refresh-dashboard-metadata", help="Read legacy source metadata for the local dashboard; never changes mail")
+    refresh.add_argument("--limit", type=int, default=500)
     dashboard = commands.add_parser("dashboard", help="Start the local-only review dashboard")
     dashboard.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
@@ -144,6 +146,15 @@ def main() -> None:
         if not 1024 <= args.port <= 65535:
             parser.error("dashboard --port must be between 1024 and 65535")
         serve_dashboard(Settings.from_env(), args.port)
+    elif args.command == "refresh-dashboard-metadata":
+        if not 1 <= args.limit <= 500:
+            parser.error("refresh-dashboard-metadata --limit must be between 1 and 500")
+        manager, store = _manager()
+        try:
+            updated, unavailable = manager.refresh_dashboard_metadata(args.limit)
+            print(f"Refreshed dashboard metadata for {updated} message(s); {unavailable} message(s) were unavailable. No messages were changed.")
+        finally:
+            store.close()
     else:
         manager, store = _manager()
         try:

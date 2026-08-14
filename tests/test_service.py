@@ -44,7 +44,7 @@ class FakeGraph:
 
     def create_reply_draft(self, email_id, body):
         self.drafts.append((email_id, body))
-        return "draft-1"
+        return "draft-1", f"https://outlook.example/drafts/{email_id}"
 
     def create_digest_draft(self, recipients, subject, body):
         self.digest_drafts.append((recipients, subject, body))
@@ -55,6 +55,9 @@ class FakeGraph:
 
     def list_folder_messages(self, folder_id, limit):
         return self.folder_messages.get(folder_id, [])[:limit]
+
+    def get_message(self, message_id):
+        return next(email for email in self.emails if email.id == message_id)
 
 
 class FakeAssistant:
@@ -102,6 +105,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(graph.drafts[0][1], "Hi Client,\n\nThanks, I will prepare the proposal.\n\nBest,\nOwner")
         self.assertIn((EMAIL.id, "AI: Action needed", True), graph.categories)
         self.assertEqual(len(graph.digest_drafts), 1)
+        self.assertEqual(len(self.store.list_runs()), 2)
         self.assertEqual((second.processed, second.skipped), (0, 1))
 
     def test_excluded_sender_is_untouched(self):
@@ -229,9 +233,45 @@ class ServiceTests(unittest.TestCase):
         messages = self.store.list_processed_messages()
         self.assertEqual(messages[0].source_web_link, unsafe.web_link)
         page = render_dashboard(messages, self.store.list_reply_preferences())
-        self.assertIn("Open source email", page)
+        self.assertIn("Open email", page)
         self.assertIn("&lt;unsafe&gt;", page)
         self.assertNotIn("<h2><unsafe>", page)
+
+    def test_dashboard_filters_and_shows_draft_link_and_reason(self):
+        graph = FakeGraph([EMAIL])
+        EmailManager(self.settings, graph, FakeAssistant(), self.store).run()
+        cards = self.store.list_processed_messages(status="drafted", search="proposal")
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0].draft_web_link, "https://outlook.example/drafts/message-1")
+        self.assertEqual(cards[0].draft_reason, "draft_created")
+        page = render_dashboard(cards, self.store.list_reply_preferences(), self.store.list_runs(), {"status": "drafted"})
+        self.assertIn("Open draft", page)
+        self.assertIn("Recent runs", page)
+
+    def test_no_draft_reason_explains_model_decision(self):
+        no_reply = Assessment(
+            needs_response=False, needs_action=False, priority="low", category="informational",
+            summary="For your information.", action_items=(), draft_reply=None,
+            suggested_followup_time="none", confidence=0.9,
+        )
+        EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(no_reply), self.store).run()
+        message = self.store.list_processed_messages()[0]
+        self.assertEqual(message.draft_reason, "AI assessed that no personal reply is needed.")
+
+    def test_refresh_dashboard_metadata_backfills_legacy_records_without_processing(self):
+        self.store.connection.execute(
+            """INSERT INTO processed_messages
+               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, sender_email, subject, source_web_link)
+               VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '')""",
+            (EMAIL.id, "2026-08-10T12:00:00Z", "action", True, True, "draft-1", "Legacy summary"),
+        )
+        self.store.connection.commit()
+        manager = EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(), self.store)
+
+        self.assertEqual(manager.refresh_dashboard_metadata(), (1, 0))
+        refreshed = self.store.list_processed_messages()[0]
+        self.assertEqual((refreshed.sender_email, refreshed.subject, refreshed.source_web_link),
+                         (EMAIL.sender_email, EMAIL.subject, EMAIL.web_link))
 
 
 if __name__ == "__main__":

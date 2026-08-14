@@ -78,7 +78,13 @@ The source message ID must already be present in local processing history. Feedb
 
 ## Local review dashboard
 
-Start the dashboard with `uv run email-manager dashboard`, then open <http://127.0.0.1:8765>. It is deliberately bound to localhost only. The review queue shows recent AI decisions, feedback buttons, and the transparent aggregate preference rules. It makes no Graph or OpenAI request by itself and cannot send, move, or delete messages. Source-email links are saved for messages processed after this dashboard update; older local records will simply show no link.
+Start the dashboard with `uv run email-manager dashboard`, then open <http://127.0.0.1:8765>. It is deliberately bound to localhost only. The review queue provides sender/subject search, category and status filters, AI decision explanations, editable feedback notes, recent run history, and transparent aggregate preference rules. It makes no Graph or OpenAI request by itself and cannot send, move, or delete messages. Source-email links are saved for messages processed after this dashboard update; reply-draft links are saved for new drafts created after this update. Older local records may show unavailable links.
+
+For records processed before dashboard metadata was stored, run the following one-time, read-only refresh. It reads only the affected messages from Graph and backfills sender, subject, and Outlook links in the local database; it never changes Outlook mail.
+
+```bash
+uv run email-manager refresh-dashboard-metadata
+```
 
 ## Future work
 

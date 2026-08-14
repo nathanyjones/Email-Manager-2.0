@@ -109,6 +109,18 @@ class GraphClient:
     def list_recent_sent_messages(self, since: datetime) -> list[Email]:
         return self._list_messages("sentitems", since)
 
+    def get_message(self, message_id: str) -> Email | None:
+        """Read one message for local metadata recovery; does not alter the mailbox."""
+        try:
+            response = self._request("GET", f"/me/messages/{quote(message_id, safe='')}", params={
+                "$select": "id,subject,from,receivedDateTime,webLink",
+            })
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code == 404:
+                return None
+            raise
+        return self._email(response.json())
+
     def list_user_folders(self) -> list[MailFolder]:
         """Return the complete visible mailbox folder tree without changing mail."""
         folders: list[MailFolder] = []
@@ -148,11 +160,11 @@ class GraphClient:
             update["flag"] = {"flagStatus": "flagged"}
         self._request("PATCH", f"/me/messages/{email.id}", json=update)
 
-    def create_reply_draft(self, email_id: str, body: str) -> str:
+    def create_reply_draft(self, email_id: str, body: str) -> tuple[str, str]:
         draft = self._request("POST", f"/me/messages/{email_id}/createReply").json()
         draft_id = draft["id"]
         self._request("PATCH", f"/me/messages/{draft_id}", json={"body": {"contentType": "Text", "content": body}})
-        return draft_id
+        return draft_id, draft.get("webLink", "")
 
     def create_digest_draft(self, recipients: tuple[str, ...], subject: str, body: str) -> str:
         message = self._request("POST", "/me/messages", json={
