@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from email_manager.models import Assessment, Email, FolderProfile, FolderSuggestion, MailFolder
+from email_manager.models import Assessment, Email, FolderProfile, FolderSuggestion, MailFolder, WorkStyleProfile
 from email_manager.dashboard import render_activity, render_dashboard, render_folders, render_preferences, render_settings
 from email_manager.service import EmailManager
 from email_manager.store import Store
@@ -318,6 +318,37 @@ class ServiceTests(unittest.TestCase):
         refreshed = self.store.list_processed_messages()[0]
         self.assertEqual((refreshed.sender_email, refreshed.subject, refreshed.source_web_link),
                          (EMAIL.sender_email, EMAIL.subject, EMAIL.web_link))
+
+    def test_get_processed_message_returns_one_local_decision_without_graph_access(self):
+        EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(), self.store).run()
+        message = self.store.get_processed_message(EMAIL.id)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertEqual((message.message_id, message.subject, message.sender_email),
+                         (EMAIL.id, EMAIL.subject, EMAIL.sender_email))
+        self.assertIsNone(self.store.get_processed_message("not-a-local-message"))
+
+    def test_process_message_is_idempotent_and_persists_decision_card_fields(self):
+        graph = FakeGraph([EMAIL])
+        manager = EmailManager(self.settings, graph, FakeAssistant(), self.store)
+        first = manager.process_message(EMAIL.id)
+        second = manager.process_message(EMAIL.id)
+        stored = self.store.get_processed_message(EMAIL.id)
+        self.assertTrue(first[1])
+        self.assertFalse(second[1])
+        self.assertEqual(len(graph.drafts), 1)
+        self.assertEqual((stored.priority, stored.action_items, stored.suggested_followup_time, stored.confidence),
+                         ("high", ("Prepare proposal",), "today", 0.9))
+
+    def test_work_style_override_and_conservative_policy_keep_hard_safety(self):
+        self.store.save_work_style(WorkStyleProfile("warm", "brief", "Hello", "Thanks", "Me", "conservative"))
+        low_confidence = Assessment(True, True, "medium", "action", "Reply requested", (), "I can help.", "today", 0.79)
+        graph = FakeGraph([EMAIL])
+        EmailManager(self.settings, graph, FakeAssistant(low_confidence), self.store).run()
+        decision = self.store.get_processed_message(EMAIL.id)
+        self.assertFalse(decision.has_draft)
+        self.assertIn("conservative", decision.draft_reason)
+        self.assertEqual(self.store.get_work_style().greeting, "Hello")
 
 
 if __name__ == "__main__":

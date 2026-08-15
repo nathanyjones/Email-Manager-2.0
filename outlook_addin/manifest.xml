@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="MailApp">
+  <Id>941ffeb8-3b8e-4b4d-b52e-6ca0f7b2c62f</Id><Version>0.1.0.0</Version><ProviderName>Email Manager</ProviderName><DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Email Manager"/><Description DefaultValue="Private, local Outlook email review assistant."/><IconUrl DefaultValue="https://localhost:8766/icon.svg"/><SupportUrl DefaultValue="https://localhost:8766/taskpane.html"/>
+  <AppDomains><AppDomain>https://localhost:8766</AppDomain></AppDomains><Hosts><Host Name="Mailbox"/></Hosts>
+  <Requirements><Sets><Set Name="Mailbox" MinVersion="1.5"/></Sets></Requirements>
+  <FormSettings><Form xsi:type="ItemRead"><DesktopSettings><SourceLocation DefaultValue="https://localhost:8766/taskpane.html"/><RequestedHeight>450</RequestedHeight></DesktopSettings></Form></FormSettings>
+  <Permissions>ReadItem</Permissions><Rule xsi:type="RuleCollection" Mode="And"><Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/></Rule>
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Requirements><bt:Sets DefaultMinVersion="1.5"><bt:Set Name="Mailbox"/></bt:Sets></Requirements><Hosts><Host xsi:type="MailHost"><DesktopFormFactor>
+        <FunctionFile resid="Commands.Url"/><ExtensionPoint xsi:type="MessageReadCommandSurface"><OfficeTab id="TabDefault"><Group id="EmailManager.Group"><Label resid="Group.Label"/><Control xsi:type="Button" id="EmailManager.ShowTaskpane"><Label resid="Taskpane.Label"/><Supertip><Title resid="Taskpane.Label"/><Description resid="Taskpane.Description"/></Supertip><Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon><Action xsi:type="ShowTaskpane"><SourceLocation resid="Taskpane.Url"/><SupportsPinning>true</SupportsPinning></Action></Control></Group></OfficeTab></ExtensionPoint>
+      </DesktopFormFactor></Host></Hosts><Resources><bt:Images><bt:Image id="Icon.16" DefaultValue="https://localhost:8766/icon.svg"/><bt:Image id="Icon.32" DefaultValue="https://localhost:8766/icon.svg"/><bt:Image id="Icon.80" DefaultValue="https://localhost:8766/icon.svg"/></bt:Images><bt:Urls><bt:Url id="Commands.Url" DefaultValue="https://localhost:8766/taskpane.html"/><bt:Url id="Taskpane.Url" DefaultValue="https://localhost:8766/taskpane.html"/></bt:Urls><bt:ShortStrings><bt:String id="Group.Label" DefaultValue="Email Manager"/><bt:String id="Taskpane.Label" DefaultValue="Open Email Manager"/></bt:ShortStrings><bt:LongStrings><bt:String id="Taskpane.Description" DefaultValue="Review the selected email with Email Manager."/></bt:LongStrings></Resources>
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>

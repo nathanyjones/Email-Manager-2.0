@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+from pathlib import Path
 import time
 
 from .ai import EmailAssistant
 from .config import Settings
 from .dashboard import serve_dashboard
 from .graph import GraphClient
+from .outlook_addin import serve_outlook_addin
 from .service import EmailManager
 from .store import Store
 
@@ -116,6 +118,10 @@ def main() -> None:
     refresh.add_argument("--limit", type=int, default=500)
     dashboard = commands.add_parser("dashboard", help="Start the local-only review dashboard")
     dashboard.add_argument("--port", type=int, default=8765)
+    outlook = commands.add_parser("outlook-addin", help="Start the localhost-only HTTPS bridge for the private Outlook add-in")
+    outlook.add_argument("--port", type=int, default=8766)
+    outlook.add_argument("--certificate", required=True, help="Trusted localhost HTTPS certificate path")
+    outlook.add_argument("--private-key", required=True, help="Matching HTTPS private-key path")
     args = parser.parse_args()
     if args.command == "run":
         _run_once()
@@ -146,6 +152,10 @@ def main() -> None:
         if not 1024 <= args.port <= 65535:
             parser.error("dashboard --port must be between 1024 and 65535")
         serve_dashboard(Settings.from_env(), args.port)
+    elif args.command == "outlook-addin":
+        if not 1024 <= args.port <= 65535:
+            parser.error("outlook-addin --port must be between 1024 and 65535")
+        serve_outlook_addin(Settings.from_env(), args.port, Path(args.certificate), Path(args.private_key))
     elif args.command == "refresh-dashboard-metadata":
         if not 1 <= args.limit <= 500:
             parser.error("refresh-dashboard-metadata --limit must be between 1 and 500")

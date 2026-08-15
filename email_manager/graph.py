@@ -113,7 +113,7 @@ class GraphClient:
         """Read one message for local metadata recovery; does not alter the mailbox."""
         try:
             response = self._request("GET", f"/me/messages/{quote(message_id, safe='')}", params={
-                "$select": "id,subject,from,receivedDateTime,webLink",
+                "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,categories,webLink",
             })
         except requests.HTTPError as error:
             if error.response is not None and error.response.status_code == 404:

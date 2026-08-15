@@ -13,3 +13,4 @@ token_cache.bin
 
 .env
 email-manager.db
+localhost*.pem

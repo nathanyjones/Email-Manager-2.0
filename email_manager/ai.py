@@ -59,6 +59,23 @@ class EmailAssistant:
             confidence=max(0.0, min(1.0, float(data.get("confidence", 0.0)))), rationale=str(data.get("rationale", ""))[:1000],
         )
 
+    def answer_question(self, email: Email, question: str, local_summary: str = "") -> str:
+        """Answer one explicit question about one selected message; never takes an email action."""
+        prompt = """You are a careful email assistant answering a user's question about one selected email.
+Use only the supplied email and local decision summary. Be concise and practical. Do not claim actions were taken,
+do not invent facts, commitments, dates, or people, and do not produce or send a reply draft. If the email does not
+provide enough information, say what needs confirming. Return plain text, no markdown heading."""
+        content = (
+            f"Local decision summary: {local_summary or 'No prior local decision is available.'}\n\n"
+            f"Email:\nFrom: {email.sender_name} <{email.sender_email}>\nSubject: {email.subject}\n"
+            f"Received: {email.received_at}\nBody:\n{email.body[:12000]}\n\nQuestion: {question[:1000]}"
+        )
+        response = self.client.chat.completions.create(
+            model=self.model, temperature=0.1,
+            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": content}],
+        )
+        return (response.choices[0].message.content or "I couldn't produce an answer for this email.").strip()[:4000]
+
     def build_folder_profile(self, folder_name: str, folder_id: str, emails: list[Email]) -> FolderProfile:
         """Summarize a bounded set of filed messages into a compact local folder profile."""
         samples = "\n\n".join(

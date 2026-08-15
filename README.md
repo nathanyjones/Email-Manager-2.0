@@ -78,13 +78,31 @@ The source message ID must already be present in local processing history. Feedb
 
 ## Local review dashboard
 
-Start the dashboard with `uv run email-manager dashboard`, then open <http://127.0.0.1:8765>. It is deliberately bound to localhost only. The Dashboard is a focused review queue: it shows only reply decisions awaiting feedback and asks one simple question at a time. Complete processing history is in Activity; the control center also includes reply preferences, learned folder profiles, and a read-only settings view. It makes no Graph or OpenAI request by itself and cannot send, move, or delete messages. Source-email links are saved for messages processed after this dashboard update; reply-draft links are saved for new drafts created after this update. Older local records may show unavailable links.
+Start the dashboard with `uv run email-manager dashboard`, then open <http://127.0.0.1:8765>. It is deliberately bound to localhost only. The Dashboard is a focused review queue: it shows only reply decisions awaiting feedback and asks one simple question at a time. Complete processing history is in Activity; Preferences is an editable local work-style profile for tone, reply length, greeting, closing, signature, and conservative versus balanced draft proactivity. It also exposes every underlying feedback decision so its derived sender/category effect can be removed. Hard no-reply, marketing/spam, and no-send safeguards always take precedence. The dashboard makes no Graph or OpenAI request by itself and cannot send, move, or delete messages.
 
 For records processed before dashboard metadata was stored, run the following one-time, read-only refresh. It reads only the affected messages from Graph and backfills sender, subject, and Outlook links in the local database; it never changes Outlook mail.
 
 ```bash
 uv run email-manager refresh-dashboard-metadata
 ```
+
+## Private Outlook add-in proof of concept
+
+The `outlook_addin/` folder is a private, sideloadable Outlook task-pane add-in. It is a thin Outlook interface over this same local service and database: it does not introduce another mailbox worker, token store, or draft policy. It shows a locally processed decision for the currently selected message, records the same explicit feedback as the dashboard, and can answer an explicit question about that one message. It never sends, moves, deletes, or automatically scans mail.
+
+For the private pilot, serve it only from your laptop over trusted localhost HTTPS. First install [mkcert](https://github.com/FiloSottile/mkcert), then create a development certificate (keep the key private):
+
+```bash
+mkcert -install
+mkcert -cert-file localhost.pem -key-file localhost-key.pem localhost 127.0.0.1 ::1
+uv run email-manager outlook-addin --certificate localhost.pem --private-key localhost-key.pem
+```
+
+In Outlook on the web, open **Get Add-ins** → **My add-ins** → **Add a custom add-in** → **Add from file**, then select [`outlook_addin/manifest.xml`](outlook_addin/manifest.xml). Open any processed email and choose **Email Manager** from the message action bar. The task pane and its local API are available only at `https://localhost:8766`; do not expose this development server to a network.
+
+The task pane can be pinned in supported Outlook clients. While pinned it quietly refreshes the local decision as the selected message changes; selection alone never reads the message from Graph or calls the AI provider. A message without a local decision shows **Analyze this email**. That explicit click uses the exact same idempotent processing path, categories, flags, feedback rules, and draft safeguards as the scheduler. The panel’s decision card includes priority, summary, proposed next steps, suggested timing, rationale, draft state, and explicit draft opening; questions (including quick questions) call the AI provider only after a click.
+
+For a Microsoft 365 work rollout, replace the localhost URLs with an approved HTTPS domain, move the local bridge/database to approved hosting, use Entra sign-in, and let IT deploy the manifest to a small pilot group through Microsoft 365 Integrated Apps. Do not sideload this private manifest into a work mailbox without approval.
 
 ## Future work
 

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from .ai import EmailAssistant
 from .config import Settings
 from .graph import GraphClient
-from .models import Assessment, ContactProfile, Email, FolderSuggestion, MailFolder, RunResult
+from .models import Assessment, ContactProfile, Email, FolderSuggestion, MailFolder, RunResult, WorkStyleProfile
 from .store import Store
 
 
@@ -37,33 +37,8 @@ class EmailManager:
                 result.skipped += 1
                 continue
             try:
-                stored_profile = self.store.get_profile(email.sender_email)
-                profile = stored_profile
-                feedback_context = self.store.feedback_summary(email.sender_email)
-                if feedback_context:
-                    profile = ContactProfile(
-                        email=profile.email, display_name=profile.display_name,
-                        relationship_notes=profile.relationship_notes, style_notes=profile.style_notes,
-                        recurring_topics=profile.recurring_topics,
-                        response_preferences="\n".join(filter(None, (profile.response_preferences, feedback_context))),
-                        examples_seen=profile.examples_seen,
-                    )
-                assessment = self.assistant.assess(email, profile, self.settings.draft_tone)
-                label = CATEGORY_LABELS[assessment.category]
-                self.graph.categorize(email, label, flagged=assessment.needs_action)
-                suggestion = self._suggest_folder(email)
-                if suggestion:
-                    self.graph.ensure_category(self._suggestion_category(suggestion), "preset6")
-                    self.graph.categorize(email, self._suggestion_category(suggestion), flagged=assessment.needs_action)
-                draft_id = None
-                draft_web_link = ""
-                draft_reason = self._draft_reason(email, assessment)
-                if draft_reason == "draft_created":
-                    draft_id, draft_web_link = self.graph.create_reply_draft(email.id, self._format_draft(email, assessment.draft_reply or ""))
-                    result.drafts_created += 1
-                self.store.record_processed(email, assessment, draft_id, suggestion.folder_name if suggestion else None,
-                                            draft_web_link, draft_reason)
-                self._learn_from_assessment(email, assessment, stored_profile)
+                assessment, draft_created, suggestion = self.process_message(email.id, email)
+                result.drafts_created += int(draft_created)
                 if assessment.needs_action:
                     result.action_items.append((email, assessment, suggestion))
                 result.processed += 1
@@ -74,10 +49,45 @@ class EmailManager:
         self.store.record_run(now.isoformat(), result.processed, result.drafts_created, result.skipped, result.errors)
         return result
 
+    def process_message(self, message_id: str, email: Email | None = None) -> tuple[Assessment, bool, FolderSuggestion | None]:
+        """Idempotently process one source message, for a schedule or explicit panel click."""
+        if self.store.was_processed(message_id):
+            existing = self.store.get_processed_message(message_id)
+            if existing is None:  # defensive; was_processed and read share one table
+                raise RuntimeError("Could not load existing local decision")
+            return Assessment(existing.needs_response, existing.needs_action, existing.priority, existing.category,
+                              existing.summary, existing.action_items, None, existing.suggested_followup_time,
+                              existing.confidence, existing.rationale), False, None
+        email = email or self.graph.get_message(message_id)
+        if email is None:
+            raise ValueError("This email is no longer available in the signed-in mailbox.")
+        if self._excluded(email):
+            raise ValueError("This sender is excluded from local Email Manager processing.")
+        stored_profile = self.store.get_profile(email.sender_email)
+        profile = stored_profile
+        feedback_context = self.store.feedback_summary(email.sender_email)
+        if feedback_context:
+            profile = ContactProfile(profile.email, profile.display_name, profile.relationship_notes, profile.style_notes,
+                                     profile.recurring_topics, "\n".join(filter(None, (profile.response_preferences, feedback_context))), profile.examples_seen)
+        style = self._work_style()
+        assessment = self.assistant.assess(email, profile, style.tone)
+        self.graph.categorize(email, CATEGORY_LABELS[assessment.category], flagged=assessment.needs_action)
+        suggestion = self._suggest_folder(email)
+        if suggestion:
+            self.graph.ensure_category(self._suggestion_category(suggestion), "preset6")
+            self.graph.categorize(email, self._suggestion_category(suggestion), flagged=assessment.needs_action)
+        draft_reason = self._draft_reason(email, assessment, style)
+        draft_id, draft_web_link = None, ""
+        if draft_reason == "draft_created":
+            draft_id, draft_web_link = self.graph.create_reply_draft(email.id, self._format_draft(email, assessment.draft_reply or "", style))
+        self.store.record_processed(email, assessment, draft_id, suggestion.folder_name if suggestion else None, draft_web_link, draft_reason)
+        self._learn_from_assessment(email, assessment, stored_profile)
+        return assessment, bool(draft_id), suggestion
+
     def _excluded(self, email: Email) -> bool:
         return email.sender_email.lower() in self.settings.excluded_senders
 
-    def _draft_reason(self, email: Email, assessment: Assessment) -> str:
+    def _draft_reason(self, email: Email, assessment: Assessment, style: WorkStyleProfile | None = None) -> str:
         if not assessment.needs_response:
             return "AI assessed that no personal reply is needed."
         if not assessment.draft_reply:
@@ -92,18 +102,29 @@ class EmailManager:
             return "Replies are blocked for automated or no-reply senders."
         if self.store.reply_preference(sender, assessment.category).suppress_drafts:
             return "Your explicit feedback suppresses drafts for this sender and category."
+        if (style or self._work_style()).draft_proactivity == "conservative" and (assessment.category != "action" or assessment.confidence < 0.80):
+            return "Your conservative profile drafts only action emails with at least 0.80 response confidence."
         return "draft_created"
 
-    def _format_draft(self, email: Email, draft_body: str) -> str:
+    def _work_style(self) -> WorkStyleProfile:
+        saved = self.store.get_work_style()
+        length = saved.reply_length or "standard"
+        length_note = {"brief": "Keep the reply brief (about 2–4 sentences).", "standard": "Use a concise, complete reply.", "detailed": "Use a thorough but focused reply."}[length]
+        return WorkStyleProfile(f"{saved.tone or self.settings.draft_tone}. {length_note}", length, saved.greeting or self.settings.draft_greeting,
+                                saved.closing or self.settings.draft_closing, saved.signature or self.settings.draft_signature,
+                                saved.draft_proactivity or "balanced")
+
+    def _format_draft(self, email: Email, draft_body: str, style: WorkStyleProfile | None = None) -> str:
+        style = style or self._work_style()
         lines: list[str] = []
-        if self.settings.draft_greeting:
+        if style.greeting:
             recipient = email.sender_name.strip() or "there"
-            lines.extend((f"{self.settings.draft_greeting} {recipient},", ""))
+            lines.extend((f"{style.greeting} {recipient},", ""))
         lines.append(draft_body.strip())
-        if self.settings.draft_closing:
-            lines.extend(("", self.settings.draft_closing))
-        if self.settings.draft_signature:
-            lines.append(self.settings.draft_signature)
+        if style.closing:
+            lines.extend(("", style.closing))
+        if style.signature:
+            lines.append(style.signature)
         return "\n".join(lines)
 
     def _suggest_folder(self, email: Email) -> FolderSuggestion | None:

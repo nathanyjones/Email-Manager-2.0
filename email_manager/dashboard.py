@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from .config import Settings
-from .models import FolderProfile, ProcessedMessage, ReplyPreference, RunHistory
+from .models import FeedbackRecord, FolderProfile, ProcessedMessage, ReplyPreference, RunHistory, WorkStyleProfile
 from .store import FEEDBACK_TYPES, Store
 
 
@@ -75,8 +75,11 @@ def render_activity(runs: list[RunHistory], messages: list[ProcessedMessage] | N
     return _layout("activity", "Activity", "See the local processing history and spot runs that need attention.", body, ((len(runs), "recent runs"), (sum(item.processed for item in runs), "processed"), (sum(item.drafts_created for item in runs), "drafts")))
 
 
-def render_preferences(preferences: list[ReplyPreference]) -> str:
-    body = f'<section class="panel"><div class="section-head"><div><h2>Learned reply preferences</h2><p>These are derived only from explicit feedback you recorded in the review queue.</p></div></div><table><thead><tr><th>Sender</th><th>Category</th><th>Positive</th><th>Negative weight</th><th>Negative share</th><th>Rule</th></tr></thead><tbody>{_preference_rows(preferences)}</tbody></table></section><section class="panel"><h2>How this stays safe</h2><p class="muted">A single accidental deletion does not change behavior. Draft suppression requires at least two negative points and 75% negative feedback for the same sender and category. Feedback remains editable from the Dashboard.</p></section>'
+def render_preferences(preferences: list[ReplyPreference], profile: WorkStyleProfile | None = None, feedback: list[FeedbackRecord] | None = None) -> str:
+    profile, feedback = profile or WorkStyleProfile(), feedback or []
+    def val(value: str) -> str: return escape(value, quote=True)
+    feedback_rows = "".join(f'<tr><td>{escape(item.recorded_at[:16].replace("T", " "))}</td><td>{escape(item.sender_email)}</td><td>{escape(item.category)}</td><td>{escape(FEEDBACK_LABELS.get(item.feedback_type, item.feedback_type))}</td><td>{escape(item.note)}</td><td><form method="post" action="/feedback"><input type="hidden" name="action" value="remove"><input type="hidden" name="message_id" value="{val(item.message_id)}"><input type="hidden" name="return_to" value="preferences"><button class="button subtle">Remove</button></form></td></tr>' for item in feedback) or '<tr><td colspan="6" class="muted">No explicit feedback yet.</td></tr>'
+    body = f'''<section class="panel"><div class="section-head"><div><h2>How I work</h2><p>These local preferences override environment defaults when filled in. Drafts stay review-only.</p></div></div><form method="post" action="/preferences" class="grid"><div><label>Tone</label><input name="tone" maxlength="500" value="{val(profile.tone)}" placeholder="Use environment default"></div><div><label>Preferred reply length</label><select name="reply_length"><option value="">Environment default</option><option value="brief"{_selected(profile.reply_length, "brief")}>Brief</option><option value="standard"{_selected(profile.reply_length, "standard")}>Standard</option><option value="detailed"{_selected(profile.reply_length, "detailed")}>Detailed</option></select></div><div><label>Greeting</label><input name="greeting" maxlength="200" value="{val(profile.greeting)}" placeholder="Use environment default"></div><div><label>Closing</label><input name="closing" maxlength="200" value="{val(profile.closing)}" placeholder="Use environment default"></div><div><label>Signature</label><textarea name="signature" maxlength="1000" placeholder="Use environment default">{escape(profile.signature)}</textarea></div><div><label>Draft proactivity</label><select name="draft_proactivity"><option value="">Balanced (environment-safe policy)</option><option value="balanced"{_selected(profile.draft_proactivity, "balanced")}>Balanced</option><option value="conservative"{_selected(profile.draft_proactivity, "conservative")}>Conservative: action email + at least 80% confidence</option></select><p class="muted">Hard no-reply, marketing/spam, and no-send safeguards always win.</p></div><div><button class="button">Save work style</button></div></form></section><section class="panel"><div class="section-head"><div><h2>Learned reply preferences</h2><p>Derived only from the feedback below.</p></div></div><table><thead><tr><th>Sender</th><th>Category</th><th>Positive</th><th>Negative weight</th><th>Negative share</th><th>Rule</th></tr></thead><tbody>{_preference_rows(preferences)}</tbody></table></section><section class="panel"><h2>Underlying feedback</h2><p class="muted">Remove an individual decision to reverse its effect immediately.</p><table><thead><tr><th>When</th><th>Sender</th><th>Category</th><th>Decision</th><th>Note</th><th></th></tr></thead><tbody>{feedback_rows}</tbody></table></section>'''
     return _layout("preferences", "Preferences", "Inspect the transparent reply rules the assistant has learned from your explicit feedback.", body, ((len(preferences), "rules"), (sum(item.suppress_drafts for item in preferences), "suppressions")))
 
 
@@ -101,7 +104,7 @@ def serve_dashboard(settings: Settings, port: int = 8765) -> None:
                 if view == "dashboard":
                     page = render_dashboard(store.list_processed_messages(status="review"), store.list_reply_preferences(), store.list_runs(), notice=notice)
                 elif view == "activity": page = render_activity(store.list_runs(), store.list_processed_messages())
-                elif view == "preferences": page = render_preferences(store.list_reply_preferences())
+                elif view == "preferences": page = render_preferences(store.list_reply_preferences(), store.get_work_style(), store.list_feedback())
                 elif view == "folders": page = render_folders(store.get_folder_profiles())
                 else: page = render_settings(settings)
             finally: store.close()
@@ -115,6 +118,15 @@ def serve_dashboard(settings: Settings, port: int = 8765) -> None:
             self._render(view, filters, "Feedback saved." if query.get("saved") else "")
 
         def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/preferences":
+                values = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode())
+                store = Store(settings.database_path)
+                try:
+                    store.save_work_style(WorkStyleProfile(*(values.get(key, [""])[0] for key in ("tone", "reply_length", "greeting", "closing", "signature", "draft_proactivity"))))
+                except ValueError as error:
+                    self._render("preferences", notice=f"Preferences were not saved: {error}"); return
+                finally: store.close()
+                self.send_response(303); self.send_header("Location", "/preferences?saved=1"); self.end_headers(); return
             if self.path != "/feedback": self.send_error(404); return
             values = parse_qs(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()); message_id = values.get("message_id", [""])[0]; kind = values.get("feedback_type", [""])[0]
             store = Store(settings.database_path)
@@ -124,7 +136,8 @@ def serve_dashboard(settings: Settings, port: int = 8765) -> None:
                 else: self._render("dashboard", notice="Feedback was not saved: choose an outcome first."); return
             except ValueError as error: self._render("dashboard", notice=f"Feedback was not saved: {error}"); return
             finally: store.close()
-            self.send_response(303); self.send_header("Location", "/?saved=1"); self.end_headers()
+            destination = "/preferences" if values.get("return_to", [""])[0] == "preferences" else "/"
+            self.send_response(303); self.send_header("Location", destination + "?saved=1"); self.end_headers()
 
         def log_message(self, format: str, *args: object) -> None: return
 

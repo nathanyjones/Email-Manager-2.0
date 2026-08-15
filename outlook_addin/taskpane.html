@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Email Manager</title>
+    <link rel="stylesheet" href="taskpane.css">
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/Office.js"></script>
+  </head>
+  <body>
+    <main class="panel">
+      <header class="hero">
+        <div class="brand"><span class="spark">✦</span><span>Email Manager</span></div>
+        <p id="status" class="status">Connecting to Outlook…</p>
+        <p class="status">Local decision assistant · <a href="http://127.0.0.1:8765/preferences" target="_blank" rel="noreferrer">how I’m working</a></p>
+      </header>
+
+      <section id="empty" class="card" hidden>
+        <h1 id="empty-title">Nothing to review yet</h1>
+        <p id="empty-copy">Choose an email to see its local decision. Email Manager never analyzes mail just because you selected it.</p>
+        <button id="analyze" class="button primary" type="button" hidden>Analyze this email</button>
+        <a href="http://127.0.0.1:8765" target="_blank" rel="noreferrer">Open local dashboard ↗</a>
+      </section>
+
+      <section id="decision" hidden>
+        <article class="card decision-card">
+          <p id="category" class="eyebrow"></p><p id="priority" class="priority"></p>
+          <h1 id="subject"></h1>
+          <p id="sender" class="sender"></p>
+          <p id="summary" class="summary"></p>
+          <div id="next-steps" class="details" hidden><strong>Next steps</strong><ul id="action-items"></ul><p id="followup"></p></div>
+          <div id="reason" class="reason"></div>
+          <div id="draft-actions" class="actions" hidden>
+            <a id="draft-link" class="button primary" target="_blank" rel="noreferrer">Open draft in Outlook ↗</a>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Ask about this email</h2>
+          <p class="muted">Your question and this selected message are sent to the configured AI provider only when you press Ask.</p>
+          <form id="question-form">
+            <textarea id="question" maxlength="1000" placeholder="What should I clarify before replying?"></textarea>
+            <button class="button primary" type="submit">Ask <span aria-hidden="true">→</span></button>
+          </form>
+          <div class="quick"><button type="button" data-question="What matters most in this email?">What matters?</button><button type="button" data-question="What should I clarify before replying?">What should I clarify?</button><button type="button" data-question="What could go wrong if I act on this?">What could go wrong?</button></div>
+          <p id="answer" class="answer" hidden></p>
+        </article>
+
+        <article class="card">
+          <h2 id="feedback-title">Was this decision useful?</h2>
+          <div id="feedback" class="feedback"></div><div id="feedback-followup" class="feedback" hidden></div>
+          <p id="feedback-result" class="success" hidden></p>
+        </article>
+      </section>
+
+      <footer>Local pilot · Nothing is sent, moved, or deleted</footer>
+    </main>
+    <script src="taskpane.js"></script>
+  </body>
+</html>

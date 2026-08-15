@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" role="img" aria-label="Email Manager">
+  <defs><linearGradient id="a" x1="8" y1="4" x2="72" y2="78" gradientUnits="userSpaceOnUse"><stop stop-color="#0b2444"/><stop offset="1" stop-color="#3285cb"/></linearGradient></defs>
+  <rect width="80" height="80" rx="20" fill="url(#a)"/>
+  <path d="M22 29.5 40 18l18 11.5v21L40 62 22 50.5v-21Z" fill="#fff" fill-opacity=".95"/>
+  <path d="m22 29.5 18 13 18-13M40 42.5V62" fill="none" stroke="#2874bd" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+  <path d="M60 15v10m5-5H55" stroke="#ccecff" stroke-linecap="round" stroke-width="3"/>
+</svg>

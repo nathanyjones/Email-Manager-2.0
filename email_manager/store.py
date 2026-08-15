@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from .models import Assessment, ContactProfile, Email, FeedbackRecord, FolderProfile, FolderSuggestion, ProcessedMessage, ReplyPreference, RunHistory
+from .models import Assessment, ContactProfile, Email, FeedbackRecord, FolderProfile, FolderSuggestion, ProcessedMessage, ReplyPreference, RunHistory, WorkStyleProfile
 
 
 FEEDBACK_TYPES = {
@@ -74,6 +74,12 @@ class Store:
                 skipped INTEGER NOT NULL,
                 errors INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS work_style_profile (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                tone TEXT NOT NULL DEFAULT '', reply_length TEXT NOT NULL DEFAULT '',
+                greeting TEXT NOT NULL DEFAULT '', closing TEXT NOT NULL DEFAULT '',
+                signature TEXT NOT NULL DEFAULT '', draft_proactivity TEXT NOT NULL DEFAULT ''
+            );
         """)
         columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(processed_messages)")}
         if "suggested_folder" not in columns:
@@ -88,6 +94,11 @@ class Store:
             self.connection.execute("ALTER TABLE processed_messages ADD COLUMN draft_web_link TEXT NOT NULL DEFAULT ''")
         if "draft_reason" not in columns:
             self.connection.execute("ALTER TABLE processed_messages ADD COLUMN draft_reason TEXT NOT NULL DEFAULT ''")
+        for name, definition in (("priority", "TEXT NOT NULL DEFAULT 'medium'"), ("action_items", "TEXT NOT NULL DEFAULT '[]'"),
+                                 ("suggested_followup_time", "TEXT NOT NULL DEFAULT 'none'"), ("confidence", "REAL NOT NULL DEFAULT 0"),
+                                 ("rationale", "TEXT NOT NULL DEFAULT ''")):
+            if name not in columns:
+                self.connection.execute(f"ALTER TABLE processed_messages ADD COLUMN {name} {definition}")
         self.connection.commit()
 
     def replace_folder_profiles(self, profiles: list[FolderProfile]) -> None:
@@ -119,11 +130,13 @@ class Store:
                          draft_web_link: str = "", draft_reason: str = "") -> None:
         self.connection.execute(
             """INSERT OR REPLACE INTO processed_messages
-               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, suggested_folder, sender_email, subject, source_web_link, draft_web_link, draft_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, suggested_folder, sender_email, subject, source_web_link, draft_web_link, draft_reason, priority, action_items, suggested_followup_time, confidence, rationale)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (email.id, datetime.now(timezone.utc).isoformat(), assessment.category,
              assessment.needs_response, assessment.needs_action, draft_id, assessment.summary, suggested_folder,
-             email.sender_email.lower(), email.subject[:500], email.web_link, draft_web_link, draft_reason),
+             email.sender_email.lower(), email.subject[:500], email.web_link, draft_web_link, draft_reason,
+             assessment.priority, json.dumps(assessment.action_items), assessment.suggested_followup_time,
+             assessment.confidence, assessment.rationale),
         )
         self.connection.commit()
 
@@ -163,8 +176,32 @@ class Store:
             needs_action=bool(row["needs_action"]), has_draft=bool(row["draft_id"]), summary=row["summary"],
             suggested_folder=row["suggested_folder"], source_web_link=row["source_web_link"],
             draft_web_link=row["draft_web_link"], draft_reason=row["draft_reason"],
+            priority=row["priority"], action_items=tuple(json.loads(row["action_items"])),
+            suggested_followup_time=row["suggested_followup_time"], confidence=row["confidence"], rationale=row["rationale"],
             feedback_type=row["feedback_type"], feedback_note=row["feedback_note"] or "",
         ) for row in rows]
+
+    def get_processed_message(self, message_id: str) -> ProcessedMessage | None:
+        """Return one local decision by its Graph message ID, without contacting Outlook."""
+        row = self.connection.execute(
+            """SELECT processed_messages.*, feedback_records.feedback_type, feedback_records.note AS feedback_note
+               FROM processed_messages LEFT JOIN feedback_records
+               ON processed_messages.message_id = feedback_records.message_id
+               WHERE processed_messages.message_id = ?""",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return ProcessedMessage(
+            message_id=row["message_id"], processed_at=row["processed_at"], sender_email=row["sender_email"],
+            subject=row["subject"], category=row["category"], needs_response=bool(row["needs_response"]),
+            needs_action=bool(row["needs_action"]), has_draft=bool(row["draft_id"]), summary=row["summary"],
+            suggested_folder=row["suggested_folder"], source_web_link=row["source_web_link"],
+            draft_web_link=row["draft_web_link"], draft_reason=row["draft_reason"],
+            priority=row["priority"], action_items=tuple(json.loads(row["action_items"])),
+            suggested_followup_time=row["suggested_followup_time"], confidence=row["confidence"], rationale=row["rationale"],
+            feedback_type=row["feedback_type"], feedback_note=row["feedback_note"] or "",
+        )
 
     def record_run(self, run_at: str, processed: int, drafts_created: int, skipped: int, errors: int) -> None:
         self.connection.execute(
@@ -276,6 +313,19 @@ class Store:
                ORDER BY sender_email, category"""
         ).fetchall()
         return [self.reply_preference(row["sender_email"], row["category"]) for row in pairs]
+
+    def get_work_style(self) -> WorkStyleProfile:
+        row = self.connection.execute("SELECT * FROM work_style_profile WHERE singleton = 1").fetchone()
+        return WorkStyleProfile() if row is None else WorkStyleProfile(row["tone"], row["reply_length"], row["greeting"], row["closing"], row["signature"], row["draft_proactivity"])
+
+    def save_work_style(self, profile: WorkStyleProfile) -> None:
+        if profile.reply_length not in {"", "brief", "standard", "detailed"} or profile.draft_proactivity not in {"", "conservative", "balanced"}:
+            raise ValueError("Invalid work-style preference")
+        self.connection.execute("""INSERT INTO work_style_profile (singleton, tone, reply_length, greeting, closing, signature, draft_proactivity)
+            VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET tone=excluded.tone, reply_length=excluded.reply_length,
+            greeting=excluded.greeting, closing=excluded.closing, signature=excluded.signature, draft_proactivity=excluded.draft_proactivity""",
+            (profile.tone.strip()[:500], profile.reply_length, profile.greeting.strip()[:200], profile.closing.strip()[:200], profile.signature.strip()[:1000], profile.draft_proactivity))
+        self.connection.commit()
 
     def replace_folder_observations(self, observations: dict[tuple[str, str, str], int]) -> None:
         """Replace learned sender-to-folder counts from a fresh folder scan."""

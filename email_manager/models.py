@@ -96,6 +96,18 @@ class ReplyPreference:
 
 
 @dataclass(frozen=True)
+class WorkStyleProfile:
+    """User-owned local drafting preferences, with environment defaults as fallback."""
+
+    tone: str = ""
+    reply_length: str = ""
+    greeting: str = ""
+    closing: str = ""
+    signature: str = ""
+    draft_proactivity: str = ""
+
+
+@dataclass(frozen=True)
 class ProcessedMessage:
     """A review-safe summary of a locally processed source message."""
 
@@ -112,6 +124,11 @@ class ProcessedMessage:
     source_web_link: str
     draft_web_link: str = ""
     draft_reason: str = ""
+    priority: str = "medium"
+    action_items: tuple[str, ...] = ()
+    suggested_followup_time: str = "none"
+    confidence: float = 0.0
+    rationale: str = ""
     feedback_type: str | None = None
     feedback_note: str = ""
 
