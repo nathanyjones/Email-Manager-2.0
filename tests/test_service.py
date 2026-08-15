@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 
 from email_manager.models import Assessment, Email, FolderProfile, FolderSuggestion, MailFolder
-from email_manager.dashboard import render_dashboard
+from email_manager.dashboard import render_activity, render_dashboard, render_folders, render_preferences, render_settings
 from email_manager.service import EmailManager
 from email_manager.store import Store
 
@@ -246,7 +246,53 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(cards[0].draft_reason, "draft_created")
         page = render_dashboard(cards, self.store.list_reply_preferences(), self.store.list_runs(), {"status": "drafted"})
         self.assertIn("Open draft", page)
-        self.assertIn("Recent runs", page)
+        self.assertIn('href="/activity"', page)
+
+    def test_review_queue_shows_only_unreviewed_reply_decisions(self):
+        EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(), self.store).run()
+        queue = self.store.list_processed_messages(status="review")
+        self.assertEqual(len(queue), 1)
+        page = render_dashboard(queue, self.store.list_reply_preferences())
+        self.assertIn("Was this draft useful?", page)
+        self.assertIn("Avoid similar emails", page)
+
+        self.store.record_feedback(EMAIL.id, "draft_sent")
+        self.assertEqual(self.store.list_processed_messages(status="review"), [])
+
+    def test_review_queue_excludes_legacy_records_without_dashboard_metadata(self):
+        self.store.connection.execute(
+            """INSERT INTO processed_messages
+               (message_id, processed_at, category, needs_response, needs_action, draft_id, summary, sender_email, subject)
+               VALUES (?, ?, ?, ?, ?, ?, ?, '', '')""",
+            ("legacy", "2026-08-10T12:00:00Z", "action", True, True, "old-draft", "Legacy summary"),
+        )
+        self.store.connection.commit()
+        self.assertEqual(self.store.list_processed_messages(status="review"), [])
+
+    def test_control_center_pages_share_the_navigation(self):
+        EmailManager(self.settings, FakeGraph([EMAIL]), FakeAssistant(), self.store).run()
+        preferences = self.store.list_reply_preferences()
+        runs = self.store.list_runs()
+        pages = (
+            render_activity(runs),
+            render_preferences(preferences),
+            render_folders(self.store.get_folder_profiles()),
+        )
+        for page in pages:
+            self.assertIn("Email Manager", page)
+            self.assertIn('href="/settings"', page)
+
+    def test_settings_view_displays_safe_configuration_without_credentials(self):
+        settings = SimpleNamespace(
+            schedules=("06:00",), lookback_hours=24, digest_mode="draft", draft_tone="concise",
+            folder_suggestions_enabled=True, folder_semantic_suggestions_enabled=False,
+            no_reply_senders=("blocked@example.com",), no_reply_domains=("example.com",),
+            database_path=Path("test.db"), openai_api_key="secret-value", client_id="secret-client",
+        )
+        page = render_settings(settings)
+        self.assertIn("Active local configuration", page)
+        self.assertNotIn("secret-value", page)
+        self.assertNotIn("secret-client", page)
 
     def test_no_draft_reason_explains_model_decision(self):
         no_reply = Assessment(

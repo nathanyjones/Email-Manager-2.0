@@ -11,7 +11,7 @@ from .models import Assessment, ContactProfile, Email, FeedbackRecord, FolderPro
 
 
 FEEDBACK_TYPES = {
-    "draft_sent", "draft_edited", "draft_deleted", "manual_draft_requested", "never_draft_like_this",
+    "draft_sent", "draft_edited", "draft_deleted", "draft_not_needed_once", "manual_draft_requested", "never_draft_like_this", "no_draft_correct",
 }
 
 
@@ -136,6 +136,11 @@ class Store:
             values.append(category)
         if status == "drafted":
             clauses.append("processed_messages.draft_id IS NOT NULL")
+        elif status == "review":
+            clauses.append("""feedback_records.message_id IS NULL
+                            AND processed_messages.needs_response = 1
+                            AND processed_messages.sender_email <> ''
+                            AND processed_messages.subject <> ''""")
         elif status == "needs-review":
             clauses.append("processed_messages.needs_response = 1 AND processed_messages.draft_id IS NULL")
         elif status == "action":
@@ -266,7 +271,9 @@ class Store:
 
     def list_reply_preferences(self) -> list[ReplyPreference]:
         pairs = self.connection.execute(
-            "SELECT DISTINCT sender_email, category FROM feedback_records ORDER BY sender_email, category"
+            """SELECT DISTINCT sender_email, category FROM feedback_records
+               WHERE feedback_type IN ('draft_sent', 'draft_edited', 'draft_deleted', 'manual_draft_requested', 'never_draft_like_this')
+               ORDER BY sender_email, category"""
         ).fetchall()
         return [self.reply_preference(row["sender_email"], row["category"]) for row in pairs]
 
